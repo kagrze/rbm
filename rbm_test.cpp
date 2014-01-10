@@ -19,7 +19,7 @@ int main(int argc, char ** argv) {
 
         std::cout << "Training data:" << std::endl;
         printColumnMajorMatrix(trainingData,6,6);
-        rbm.train(trainingData,6,1);
+        rbm.train(trainingData,6,5000);
 
         float visible1 [] = {0,0,0,1,1,0};
         std::cout << "Visible=" << std::endl;

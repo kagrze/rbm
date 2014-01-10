@@ -4,7 +4,7 @@
 #include "rbm.h"
 #include "rbm_kernels.h"
 
-#define DEBUG true
+#define DEBUG false
 
 void printColumnMajorMatrix(float *A, int nrRows, int nrCols) {
     for(int i = 0; i < nrRows; ++i){
