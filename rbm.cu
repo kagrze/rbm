@@ -38,7 +38,7 @@ void checkCuRandError(int line, curandStatus_t stat) {
 }
 
 RBM::RBM(int visible, int hidden, float rate) {
-	blockSize=512;
+	blockSize=512;	//it is assumed that number of training examples is big (exv and exh are bigger than 512); otherwise blockSize should be set dynamically
 	numVisible = visible;
 	numHidden = hidden;
 	learningRate = rate;
@@ -140,7 +140,7 @@ float * RBM::visibleActivationProbability(float * dHiddenUnitsStates, int exampl
 
 float * RBM::computeAssociations(float * dVisibleUnitsActivationProbabilities, float * dHiddenUnitsActivationProbabilities, int examplesNumber) {
 	float * dAssociations;	//vxh matrix
-	cudaMalloc(&dAssociations,(numVisible+1)*(numHidden+1)*sizeof(float));//because of bias
+	cudaMalloc(&dAssociations,(numVisible+1)*(numHidden+1)*sizeof(float));// +1 because of bias
 
 	const float alpha = 1;
 	const float beta =  0;
@@ -165,9 +165,9 @@ float * RBM::computeAssociations(float * dVisibleUnitsActivationProbabilities, f
 	return dAssociations;
 }
 
-//contrastive divergence learning algorithm
+//a contrastive divergence learning algorithm
 void RBM::train(float * hTrainingData, int examplesNumber, int maxEpochs) {
-	float hBias[examplesNumber];
+	float hBias[examplesNumber]; //will be added as a first column of training data
 	std::fill_n(hBias,examplesNumber,1.0);
 
 	float *dVisibleUnitsStates; 					//device copy of training data
@@ -192,13 +192,13 @@ void RBM::train(float * hTrainingData, int examplesNumber, int maxEpochs) {
 
 		//copy bias to the first column
 		cudaMemcpy(dVisibleUnitsStates,hBias,examplesNumber*sizeof(float),cudaMemcpyHostToDevice);
-		//copy trainingData to remaining cells
+		//copy training data to remaining cells
 		cudaMemcpy(&dVisibleUnitsStates[examplesNumber],hTrainingData,numVisible*examplesNumber*sizeof(float),cudaMemcpyHostToDevice);
 
 		//calculate positive hidden activation probabilities
 		dPositiveHiddenUnitsActivationProbabilities = hiddenActivationProbability(dVisibleUnitsStates, examplesNumber);
 
-		if(DEBUG) std::cout << "Calculating hidden unit states" << std::endl;
+		if(DEBUG) std::cout << "Calculating hidden unit states by sampling" << std::endl;
 		checkCuRandError(__LINE__,curandGenerateUniform(generator,dRandom,examplesNumber*(numHidden+1)));
 		int blockNumber = examplesNumber*(numHidden+1)/blockSize + 1;
 		greaterThan<<<blockNumber,blockSize>>>(dPositiveHiddenUnitsActivationProbabilities,dRandom,dHiddenUnitsStates,examplesNumber*(numHidden+1));
@@ -274,10 +274,9 @@ float * RBM::hiddenActivationProbability(float *hVisible) {
 
 	dHidden = hiddenActivationProbability(dVisible, 1);
 
-	//sample
+	//sampling
 	cudaMalloc(&dRandom,(numHidden+1)*sizeof(float));
 	checkCuRandError(__LINE__,curandGenerateUniform(generator,dRandom,numHidden+1));
-	int blockSize = 512;
 	int blockNumber = (numHidden+1)/blockSize + 1;
 	greaterThan<<<blockNumber,blockSize>>>(dHidden,dRandom,dHidden,numHidden+1);
 
