@@ -13,8 +13,8 @@ private:
 	curandGenerator_t generator;
 	int blockSize;
 
-	float * hiddenActivationProbability(float * dVisibleUnitsStates, int examplesNumber);
-	float * visibleActivationProbability(float * dHiddenUnitsStates, int examplesNumber);
+	float * hiddenActivationProbabilities(float * dVisibleUnitsStates, int examplesNumber);
+	float * visibleActivationProbabilities(float * dHiddenUnitsStates, int examplesNumber);
 	float * computeAssociations(float * dVisibleUnitsActivationProbabilities, float * dHiddenUnitsActivationProbabilities, int examplesNumber);
 public:
 	RBM(int visibleNumber, int hiddenNumber, float rate);
@@ -23,5 +23,5 @@ public:
 	//each row is a training example consisting of the states of visible units
 	//matrix is written to array in column-major order
 	void train(float * hTrainingData, int examplesNumber, int maxEpochs);
-	float * hiddenActivationProbability(float * hVisible);
+	float * hiddenStates(float * hVisible);
 };

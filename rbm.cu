@@ -62,7 +62,7 @@ RBM::~RBM() {
 	std::cout << "RBM destroyed" << std::endl;
 }
 
-float * RBM::hiddenActivationProbability(float * dVisibleUnitsStates, int examplesNumber) {
+float * RBM::hiddenActivationProbabilities(float * dVisibleUnitsStates, int examplesNumber) {
 	float *dHiddenUnitsActivationEnergy;		//matrix of float values of dim exh
 	float *dHiddenUnitsActivationProbabilities;	//matrix of [0,1] values of dim exh
 	cudaMalloc(&dHiddenUnitsActivationEnergy,(numHidden+1)*examplesNumber*sizeof(float));
@@ -99,7 +99,7 @@ float * RBM::hiddenActivationProbability(float * dVisibleUnitsStates, int exampl
 	return dHiddenUnitsActivationProbabilities;
 }
 
-float * RBM::visibleActivationProbability(float * dHiddenUnitsStates, int examplesNumber) {
+float * RBM::visibleActivationProbabilities(float * dHiddenUnitsStates, int examplesNumber) {
 	float *dVisibleUnitsActivationEnergy;			//matrix of float values of dim exv
 	float *dVisibleUnitsActivationProbabilities;	//matrix of [0,1] values of dim exv
 	cudaMalloc(&dVisibleUnitsActivationEnergy,(numVisible+1)*examplesNumber*sizeof(float));
@@ -196,7 +196,7 @@ void RBM::train(float * hTrainingData, int examplesNumber, int maxEpochs) {
 		cudaMemcpy(&dVisibleUnitsStates[examplesNumber],hTrainingData,numVisible*examplesNumber*sizeof(float),cudaMemcpyHostToDevice);
 
 		//calculate positive hidden activation probabilities
-		dPositiveHiddenUnitsActivationProbabilities = hiddenActivationProbability(dVisibleUnitsStates, examplesNumber);
+		dPositiveHiddenUnitsActivationProbabilities = hiddenActivationProbabilities(dVisibleUnitsStates, examplesNumber);
 
 		if(DEBUG) std::cout << "Calculating hidden unit states by sampling" << std::endl;
 		checkCuRandError(__LINE__,curandGenerateUniform(generator,dRandom,examplesNumber*(numHidden+1)));
@@ -210,14 +210,14 @@ void RBM::train(float * hTrainingData, int examplesNumber, int maxEpochs) {
 		//a negative (reconstruction) phase of the contrastive divergence
 
 		//calculate negative visible probabilities
-		dVisibleUnitsActivationProbabilities = visibleActivationProbability(dHiddenUnitsStates,examplesNumber);
+		dVisibleUnitsActivationProbabilities = visibleActivationProbabilities(dHiddenUnitsStates,examplesNumber);
 
 		if(DEBUG) std::cout << "Fixing visible units activation probabilities by setting bias to the first column" << std::endl;
 		cudaMemcpy(dVisibleUnitsActivationProbabilities,hBias,examplesNumber*sizeof(float),cudaMemcpyHostToDevice);
 
 		if(DEBUG) printDeviceColumnMajorMatrix(dVisibleUnitsActivationProbabilities,examplesNumber,numVisible+1);
 		//negative hidden probabilities
-		dNegativeHiddenUnitsActivationProbabilities = hiddenActivationProbability(dVisibleUnitsActivationProbabilities,examplesNumber);
+		dNegativeHiddenUnitsActivationProbabilities = hiddenActivationProbabilities(dVisibleUnitsActivationProbabilities,examplesNumber);
 
 		if(DEBUG) std::cout << "Calculating negative associations" << std::endl;
 		dNegativeAssociations = computeAssociations(dVisibleUnitsActivationProbabilities,dNegativeHiddenUnitsActivationProbabilities, examplesNumber);
@@ -259,7 +259,7 @@ void RBM::train(float * hTrainingData, int examplesNumber, int maxEpochs) {
 	printDeviceColumnMajorMatrix(dWeights,numVisible+1,numHidden+1);
 }
 
-float * RBM::hiddenActivationProbability(float *hVisible) {
+float * RBM::hiddenStates(float *hVisible) {
 	float * dVisible;
 	float * dHidden;
 	float * hHidden;
@@ -272,7 +272,7 @@ float * RBM::hiddenActivationProbability(float *hVisible) {
 	cudaMemcpy(dVisible,&bias,sizeof(float),cudaMemcpyHostToDevice);
 	cudaMemcpy(&dVisible[1],hVisible,numVisible*sizeof(float),cudaMemcpyHostToDevice); //set bias
 
-	dHidden = hiddenActivationProbability(dVisible, 1);
+	dHidden = hiddenActivationProbabilities(dVisible, 1);
 
 	//sampling
 	cudaMalloc(&dRandom,(numHidden+1)*sizeof(float));

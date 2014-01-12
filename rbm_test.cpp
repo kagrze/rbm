@@ -24,21 +24,21 @@ int main(int argc, char ** argv) {
 	float visible1 [] = {0,0,0,1,1,0};
 	std::cout << "Visible=" << std::endl;
 	printColumnMajorMatrix(visible1,1,6);
-	float * hidden = rbm.hiddenActivationProbability(visible1);
+	float * hidden = rbm.hiddenStates(visible1);
 	std::cout << "Hidden=" << std::endl;
 	printColumnMajorMatrix(hidden,1,2);
 
 	float visible2 [] = {1,0,0,0,0,0};
 	std::cout << "Visible=" << std::endl;
 	printColumnMajorMatrix(visible2,1,6);
-	hidden = rbm.hiddenActivationProbability(visible2);
+	hidden = rbm.hiddenStates(visible2);
 	std::cout << "Hidden=" << std::endl;
 	printColumnMajorMatrix(hidden,1,2);
 
 	float visible3 [] = {0,0,0,0,0,1};
 	std::cout << "Visible=" << std::endl;
 	printColumnMajorMatrix(visible3,1,6);
-	hidden = rbm.hiddenActivationProbability(visible3);
+	hidden = rbm.hiddenStates(visible3);
 	std::cout << "Hidden=" << std::endl;
 	printColumnMajorMatrix(hidden,1,2);
 
