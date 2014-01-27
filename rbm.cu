@@ -4,6 +4,7 @@
 #include "rbm.h"
 #include "rbm_kernels.h"
 
+#define INFO false
 #define DEBUG false
 
 void printColumnMajorMatrix(float *A, int nrRows, int nrCols) {
@@ -48,8 +49,10 @@ RBM::RBM(int visible, int hidden, float rate) {
 	checkCuRandError(__LINE__,curandCreateGenerator(&generator,CURAND_RNG_QUASI_DEFAULT));
 	checkCuRandError(__LINE__,curandGenerateNormal(generator,dWeights,weightsNumber,0.0,0.1));
 
-	std::cout <<"Initial weights="<<std::endl;
-	printDeviceColumnMajorMatrix(dWeights,numVisible+1,numHidden+1);
+	if(INFO) {
+		std::cout <<"Initial weights="<<std::endl;
+		printDeviceColumnMajorMatrix(dWeights,numVisible+1,numHidden+1);
+	}
 
 	checkCuBlasError(__LINE__,cublasCreate(&handle));
 	std::cout << "RBM initialized" << std::endl;
@@ -165,7 +168,7 @@ float * RBM::computeAssociations(float * dVisibleUnitsActivationProbabilities, f
 	return dAssociations;
 }
 
-//a contrastive divergence learning algorithm
+//a contrastive divergence (CD_1) learning algorithm; batched version
 void RBM::train(float * hTrainingData, int examplesNumber, int maxEpochs) {
 	float hBias[examplesNumber]; //will be added as a first column of training data
 	std::fill_n(hBias,examplesNumber,1.0);
