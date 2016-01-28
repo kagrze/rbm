@@ -1,7 +1,8 @@
+#ifndef RBM_H_
+#define RBM_H_
+
 #include <cublas_v2.h>
 #include <curand.h>
-
-void printColumnMajorMatrix(float *A, int nrRows, int nrCols);
 
 class RBM {
  private:
@@ -11,7 +12,6 @@ class RBM {
     float *dWeights; // column-major matrix of dim numVisible+1 x numHidden+1 (+1 because of bias)
     cublasHandle_t    handle;
     curandGenerator_t generator;
-    int blockSize;
 
     float *hiddenActivationProbabilities(float *dVisibleUnitsStates, int examplesNumber);
     float *visibleActivationProbabilities(float *dHiddenUnitsStates, int examplesNumber);
@@ -28,3 +28,5 @@ class RBM {
     void train(float *hTrainingData, int examplesNumber, int maxEpochs);
     float *hiddenStates(float *hVisible);
 };
+
+#endif  // RBM_H_

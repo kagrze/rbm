@@ -1,3 +1,6 @@
+#ifndef KERNELS_H_
+#define KERNELS_H_
+
 __global__ void sigmoid(float *dInputArray, float *dOutputArray, int arraySize);
 __global__ void greaterThan(float *dLHS, float *dRHS, float *dOutputArray, int arraySize);
 __global__ void updateWeight(float *dWeights,
@@ -7,4 +10,5 @@ __global__ void updateWeight(float *dWeights,
                              int    examplesNumber,
                              float  learningRate);
 __global__ void subAndSquare(float *a, float *b, int size);
-__global__ void sumReduce(float *array, int size);
+
+#endif  // KERNELS_H_

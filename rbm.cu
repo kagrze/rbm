@@ -1,57 +1,30 @@
 #include <iostream>
 #include <cublas_v2.h>
 #include <curand.h>
+#include <thrust/reduce.h>
+#include <thrust/device_ptr.h>
 #include "rbm.h"
 #include "rbm_kernels.h"
+#include "utils.h"
 
 #define INFO  false
 #define DEBUG false
 
-void printColumnMajorMatrix(float *A, int nrRows, int nrCols) {
-    for (int i = 0; i < nrRows; ++i) {
-        for (int j = 0; j < nrCols; ++j)
-            std::cout << A[nrRows * j + i] << " ";
-        std::cout << std::endl;
-    }
-    std::cout << std::endl;
-}
-
-void printDeviceColumnMajorMatrix(float *dA, int nrRows, int nrCols) {
-    int   size = nrRows * nrCols;
-    float hA[size];
-
-    cudaMemcpy(hA, dA, size * sizeof(float), cudaMemcpyDeviceToHost);
-    printColumnMajorMatrix(hA, nrRows, nrCols);
-}
-
-void checkCuBlasError(int line, cublasStatus_t stat) {
-    if (stat != CUBLAS_STATUS_SUCCESS) {
-        std::cout << "CUBLAS error at line: " << line << ", status: " << stat << std::endl;
-        exit(EXIT_FAILURE);
-    }
-}
-
-void checkCuRandError(int line, curandStatus_t stat) {
-    if (stat != CURAND_STATUS_SUCCESS) {
-        std::cout << "CURAND error at line: " << line << ", status: " << stat << std::endl;
-        exit(EXIT_FAILURE);
-    }
-}
+#define BLOCK_SIZE 1024 // it is assumed that a number of training examples is big (exv and exh are bigger than 1024)
+                        // otherwise BLOCK_SIZE should be set dynamically
 
 RBM::RBM(int visible, int hidden, float rate) {
-    blockSize = 512;    // it is assumed that number of training examples is big (exv and exh are bigger than 512);
-                        // otherwise blockSize should be set dynamically
     numVisible   = visible;
     numHidden    = hidden;
     learningRate = rate;
 
     int weightsNumber = (numVisible + 1) * (numHidden + 1);  // +1 because of bias
-    cudaMalloc(&dWeights, weightsNumber * sizeof(float));
+    checkCudaError(__LINE__, cudaMalloc(&dWeights, weightsNumber * sizeof(float)));
     checkCuRandError(__LINE__, curandCreateGenerator(&generator, CURAND_RNG_QUASI_DEFAULT));
     checkCuRandError(__LINE__, curandGenerateNormal(generator, dWeights, weightsNumber, 0.0, 0.1));
 
     if (INFO) {
-        std::cout << "Initial weights=" << std::endl;
+        std::cout << "Initial weights:" << std::endl;
         printDeviceColumnMajorMatrix(dWeights, numVisible + 1, numHidden + 1);
     }
 
@@ -60,7 +33,7 @@ RBM::RBM(int visible, int hidden, float rate) {
 }
 
 RBM::~RBM() {
-    cudaFree(dWeights);
+    checkCudaError(__LINE__, cudaFree(dWeights));
     cublasDestroy(handle);
     curandDestroyGenerator(generator);
     std::cout << "RBM destroyed" << std::endl;
@@ -70,8 +43,10 @@ float *RBM::hiddenActivationProbabilities(float *dVisibleUnitsStates, int exampl
     float *dHiddenUnitsActivationEnergy;        // matrix of float values of dim exh
     float *dHiddenUnitsActivationProbabilities; // matrix of [0,1] values of dim exh
 
-    cudaMalloc(&dHiddenUnitsActivationEnergy, (numHidden + 1) * examplesNumber * sizeof(float));
-    cudaMalloc(&dHiddenUnitsActivationProbabilities, (numHidden + 1) * examplesNumber * sizeof(float));
+    int hiddenBufferSize = (numHidden + 1) * examplesNumber;
+
+    checkCudaError(__LINE__, cudaMalloc(&dHiddenUnitsActivationEnergy, hiddenBufferSize * sizeof(float)));
+    checkCudaError(__LINE__, cudaMalloc(&dHiddenUnitsActivationProbabilities, hiddenBufferSize * sizeof(float)));
 
     if (DEBUG) std::cout << "Calculating hidden units activation energies" << std::endl;
 
@@ -95,12 +70,13 @@ float *RBM::hiddenActivationProbabilities(float *dVisibleUnitsStates, int exampl
 
     if (DEBUG) printDeviceColumnMajorMatrix(dHiddenUnitsActivationEnergy, examplesNumber, numHidden + 1);
 
-    int blockNumber = examplesNumber * (numHidden + 1) / blockSize + 1;
-    if (DEBUG) std::cout << "Calculating hidden probabilities" << std::endl;
-    sigmoid<<<blockNumber, blockSize>>>(dHiddenUnitsActivationEnergy, dHiddenUnitsActivationProbabilities, examplesNumber * (numHidden + 1));
+    int blockNumber = hiddenBufferSize / BLOCK_SIZE + 1;
+    if (DEBUG) std::cout << "Calculating hidden probabilities " << BLOCK_SIZE << std::endl;
+    sigmoid<<<blockNumber, BLOCK_SIZE>>>(dHiddenUnitsActivationEnergy, dHiddenUnitsActivationProbabilities, hiddenBufferSize);
+    checkCudaError(__LINE__);
     if (DEBUG) printDeviceColumnMajorMatrix(dHiddenUnitsActivationProbabilities, examplesNumber, numHidden + 1);
 
-    cudaFree(dHiddenUnitsActivationEnergy);
+    checkCudaError(__LINE__, cudaFree(dHiddenUnitsActivationEnergy));
     return dHiddenUnitsActivationProbabilities;
 }
 
@@ -108,8 +84,10 @@ float *RBM::visibleActivationProbabilities(float *dHiddenUnitsStates, int exampl
     float *dVisibleUnitsActivationEnergy;        // matrix of float values of dim exv
     float *dVisibleUnitsActivationProbabilities; // matrix of [0,1] values of dim exv
 
-    cudaMalloc(&dVisibleUnitsActivationEnergy, (numVisible + 1) * examplesNumber * sizeof(float));
-    cudaMalloc(&dVisibleUnitsActivationProbabilities, (numVisible + 1) * examplesNumber * sizeof(float));
+    int visibleBufferSize = (numVisible + 1) * examplesNumber;
+
+    checkCudaError(__LINE__, cudaMalloc(&dVisibleUnitsActivationEnergy, visibleBufferSize * sizeof(float)));
+    checkCudaError(__LINE__, cudaMalloc(&dVisibleUnitsActivationProbabilities, visibleBufferSize * sizeof(float)));
 
     if (DEBUG) std::cout << "Calculating visible units activation energies" << std::endl;
 
@@ -133,23 +111,25 @@ float *RBM::visibleActivationProbabilities(float *dHiddenUnitsStates, int exampl
 
     if (DEBUG) printDeviceColumnMajorMatrix(dVisibleUnitsActivationEnergy, examplesNumber, numVisible + 1);
 
-    int blockNumber = examplesNumber * (numVisible + 1) / blockSize + 1;
-    if (DEBUG) std::cout << "Calculating visible probabilities" << blockNumber << " " << blockSize << std::endl;
-
-    sigmoid<<<blockNumber, blockSize>>>(dVisibleUnitsActivationEnergy, dVisibleUnitsActivationProbabilities, examplesNumber * (numVisible + 1));
+    int blockNumber = visibleBufferSize / BLOCK_SIZE + 1;
+    if (DEBUG) std::cout << "Calculating visible probabilities" << std::endl;
 
     if (DEBUG) printDeviceColumnMajorMatrix(dVisibleUnitsActivationProbabilities, examplesNumber, numVisible + 1);
 
-    cudaFree(dVisibleUnitsActivationEnergy);
+    sigmoid<<<blockNumber, BLOCK_SIZE>>>(dVisibleUnitsActivationEnergy, dVisibleUnitsActivationProbabilities, visibleBufferSize);
+
+    checkCudaError(__LINE__);
+
+    if (DEBUG) printDeviceColumnMajorMatrix(dVisibleUnitsActivationProbabilities, examplesNumber, numVisible + 1);
+
+    checkCudaError(__LINE__, cudaFree(dVisibleUnitsActivationEnergy));
     return dVisibleUnitsActivationProbabilities;
 }
 
-float *RBM::computeAssociations(float *dVisibleUnitsActivationProbabilities,
-                                float *dHiddenUnitsActivationProbabilities,
-                                int    examplesNumber) {
+float *RBM::computeAssociations(float *dVisibleUnitsActivationProbabilities, float *dHiddenUnitsActivationProbabilities, int examplesNumber) {
     float *dAssociations; // vxh matrix
 
-    cudaMalloc(&dAssociations, (numVisible + 1) * (numHidden + 1) * sizeof(float)); // +1 because of bias
+    checkCudaError(__LINE__, cudaMalloc(&dAssociations, (numVisible + 1) * (numHidden + 1) * sizeof(float))); // +1 because of bias
 
     const float alpha = 1;
     const float beta  = 0;
@@ -169,6 +149,7 @@ float *RBM::computeAssociations(float *dVisibleUnitsActivationProbabilities,
                          dAssociations,
                          numVisible + 1)); // ldc
 
+    if (DEBUG) std::cout << "Associations:" << std::endl;
     if (DEBUG) printDeviceColumnMajorMatrix(dAssociations, numVisible + 1, numHidden + 1);
 
     return dAssociations;
@@ -192,87 +173,99 @@ void RBM::train(float *hTrainingData, int examplesNumber, int maxEpochs) {
 
     float *dRandom;                                     // matrix of dimensions exh of random values [0,1]
 
-    cudaMalloc(&dVisibleUnitsStates, (numVisible + 1) * examplesNumber * sizeof(float));
-    cudaMalloc(&dHiddenUnitsStates, (numHidden + 1) * examplesNumber * sizeof(float));
-    cudaMalloc(&dRandom, examplesNumber * (numHidden + 1) * sizeof(float));
+    int visibleBufferSize = (numVisible + 1) * examplesNumber;
+    int hiddenBufferSize  = (numHidden + 1) * examplesNumber;
+
+    checkCudaError(__LINE__, cudaMalloc(&dVisibleUnitsStates, visibleBufferSize * sizeof(float)));
+    checkCudaError(__LINE__, cudaMalloc(&dHiddenUnitsStates, hiddenBufferSize * sizeof(float)));
+    checkCudaError(__LINE__, cudaMalloc(&dRandom, hiddenBufferSize * sizeof(float)));
 
     for (int e = 0; e < maxEpochs; e++) {
         // a positive phase of the contrastive divergence
-        if (DEBUG) std::cout << "Epoch " << e << std::endl;
+
         // copy bias to the first column
-        cudaMemcpy(dVisibleUnitsStates, hBias, examplesNumber * sizeof(float), cudaMemcpyHostToDevice);
+        checkCudaError(__LINE__, cudaMemcpy(dVisibleUnitsStates, hBias, examplesNumber * sizeof(float), cudaMemcpyHostToDevice));
 
         // copy training data to remaining cells
-        cudaMemcpy(&dVisibleUnitsStates[examplesNumber],
-                   hTrainingData,
-                   numVisible * examplesNumber * sizeof(float),
-                   cudaMemcpyHostToDevice);
+        checkCudaError(__LINE__, cudaMemcpy(&dVisibleUnitsStates[examplesNumber],
+                                            hTrainingData,
+                                            numVisible * examplesNumber * sizeof(float),
+                                            cudaMemcpyHostToDevice));
+
+        if (DEBUG) std::cout << "Visible units states:" << std::endl;
+        if (DEBUG) printDeviceColumnMajorMatrix(dVisibleUnitsStates, examplesNumber, numVisible + 1);
 
         // calculate positive hidden activation probabilities
+
         dPositiveHiddenUnitsActivationProbabilities = hiddenActivationProbabilities(dVisibleUnitsStates, examplesNumber);
 
+        if (DEBUG) std::cout << "Fixing hidden units activation probabilities by setting bias to the first column" << std::endl;
+        checkCudaError(__LINE__, cudaMemcpy(dPositiveHiddenUnitsActivationProbabilities, hBias, examplesNumber * sizeof(float), cudaMemcpyHostToDevice));
+        if (DEBUG) printDeviceColumnMajorMatrix(dPositiveHiddenUnitsActivationProbabilities, examplesNumber, numHidden + 1);
+
         if (DEBUG) std::cout << "Calculating hidden unit states by sampling" << std::endl;
-        checkCuRandError(__LINE__, curandGenerateUniform(generator, dRandom, examplesNumber * (numHidden + 1)));
-        int blockNumber = examplesNumber * (numHidden + 1) / blockSize + 1;
-        greaterThan<<<blockNumber, blockSize>>>(dPositiveHiddenUnitsActivationProbabilities, dRandom, dHiddenUnitsStates, examplesNumber * (numHidden + 1));
+        checkCuRandError(__LINE__, curandGenerateUniform(generator, dRandom, hiddenBufferSize));
+        int blockNumber = hiddenBufferSize / BLOCK_SIZE + 1;
+        greaterThan<<<blockNumber, BLOCK_SIZE>>>(dPositiveHiddenUnitsActivationProbabilities, dRandom, dHiddenUnitsStates, examplesNumber * (numHidden + 1));
+        checkCudaError(__LINE__);
         if (DEBUG) printDeviceColumnMajorMatrix(dHiddenUnitsStates, examplesNumber, numHidden + 1);
 
-        if (DEBUG) std::cout << "Calculating positive associations" << std::endl;
-        dPositiveAssociations = computeAssociations(dVisibleUnitsStates,
-                                                    dPositiveHiddenUnitsActivationProbabilities,
-                                                    examplesNumber);
+        dPositiveAssociations = computeAssociations(dVisibleUnitsStates, dPositiveHiddenUnitsActivationProbabilities, examplesNumber);
 
         // a negative (reconstruction) phase of the contrastive divergence
 
         // calculate negative visible probabilities
         dVisibleUnitsActivationProbabilities = visibleActivationProbabilities(dHiddenUnitsStates, examplesNumber);
 
-        if (DEBUG) std::cout << "Fixing visible units activation probabilities by setting bias to the first column" << std::endl;
-        cudaMemcpy(dVisibleUnitsActivationProbabilities, hBias, examplesNumber * sizeof(float), cudaMemcpyHostToDevice);
-
+        if (DEBUG) std::cout << "Visible Units Activation Probabilities:" << std::endl;
         if (DEBUG) printDeviceColumnMajorMatrix(dVisibleUnitsActivationProbabilities, examplesNumber, numVisible + 1);
+
+        if (DEBUG) std::cout << "Fixing visible units activation probabilities by setting bias to the first column" << std::endl;
+        checkCudaError(__LINE__, cudaMemcpy(dVisibleUnitsActivationProbabilities, hBias, examplesNumber * sizeof(float), cudaMemcpyHostToDevice));
+        if (DEBUG) printDeviceColumnMajorMatrix(dVisibleUnitsActivationProbabilities, examplesNumber, numVisible + 1);
+
         // negative hidden probabilities
-        dNegativeHiddenUnitsActivationProbabilities = hiddenActivationProbabilities(
-            dVisibleUnitsActivationProbabilities,
-            examplesNumber);
+        dNegativeHiddenUnitsActivationProbabilities = hiddenActivationProbabilities(dVisibleUnitsActivationProbabilities, examplesNumber);
+
+        if (DEBUG) std::cout << "Negative Hidden units activation probabilities:" << std::endl;
+        if (DEBUG) printDeviceColumnMajorMatrix(dNegativeHiddenUnitsActivationProbabilities, examplesNumber, numHidden + 1);
 
         if (DEBUG) std::cout << "Calculating negative associations" << std::endl;
-        dNegativeAssociations = computeAssociations(dVisibleUnitsActivationProbabilities,
-                                                    dNegativeHiddenUnitsActivationProbabilities,
-                                                    examplesNumber);
+        dNegativeAssociations = computeAssociations(dVisibleUnitsActivationProbabilities, dNegativeHiddenUnitsActivationProbabilities, examplesNumber);
 
         if (DEBUG) std::cout << "Updating weights" << std::endl;
         int weightsNumber = (numHidden + 1) * (numVisible + 1);
-        blockNumber = weightsNumber / blockSize + 1;
-        updateWeight<<<blockNumber, blockSize>>>(dWeights, dPositiveAssociations, dNegativeAssociations, weightsNumber, examplesNumber, learningRate);
+        blockNumber = weightsNumber / BLOCK_SIZE + 1;
+        updateWeight<<<blockNumber, BLOCK_SIZE>>>(dWeights, dPositiveAssociations, dNegativeAssociations, weightsNumber, examplesNumber, learningRate);
+        checkCudaError(__LINE__);
         if (DEBUG) printDeviceColumnMajorMatrix(dWeights, numVisible + 1, numHidden + 1);
 
-        if (DEBUG) std::cout << "Calculating error - squares of subtractions" << std::endl;
-        blockNumber = examplesNumber / blockSize + 1;
+        blockNumber = visibleBufferSize / BLOCK_SIZE + 1;
+        if (DEBUG) std::cout << "Calculating error - squares of subtractions: " << std::endl;
+
         // for memory efficiency we will write subtraction result to one of the input matrices (dVisibleUnitsStates)
-        subAndSquare<<<blockNumber, blockSize>>>(dVisibleUnitsStates, dVisibleUnitsActivationProbabilities, (numVisible + 1) * examplesNumber);
-        if (DEBUG) printDeviceColumnMajorMatrix(dVisibleUnitsStates, examplesNumber, (numVisible + 1));
+        subAndSquare<<<blockNumber, BLOCK_SIZE>>>(dVisibleUnitsStates, dVisibleUnitsActivationProbabilities, visibleBufferSize);
+        checkCudaError(__LINE__);
+        if (DEBUG) printDeviceColumnMajorMatrix(dVisibleUnitsStates, examplesNumber, numVisible + 1);
 
-        blockNumber = examplesNumber / 2 / blockSize + 1;
-        if (DEBUG) std::cout << "Calculation error - reducing sum" << std::endl;
-        sumReduce<<<blockNumber, blockSize>>>(dVisibleUnitsStates, (numVisible + 1) * examplesNumber);
-        if (DEBUG) printDeviceColumnMajorMatrix(dVisibleUnitsStates, examplesNumber, (numVisible + 1));
+        if (DEBUG) std::cout << "Calculation error - reducing sum:" << std::endl;
+        thrust::device_ptr<float> dVisibleUnitsStatesPtr(dVisibleUnitsStates);
+        float hError = thrust::reduce(dVisibleUnitsStatesPtr, dVisibleUnitsStatesPtr + visibleBufferSize, 0.0, thrust::plus<float>());
 
-        float hError;
-        cudaMemcpy(&hError, dVisibleUnitsStates, sizeof(float), cudaMemcpyDeviceToHost);
+        if (DEBUG) printDeviceColumnMajorMatrix(dVisibleUnitsStates, examplesNumber, numVisible + 1);
 
-        std::cout << "Error after epoch " << e + 1 << " is " << hError << std::endl;
+        std::cout << "Reconstruction error after epoch " << e + 1 << " is " << hError << std::endl;
 
-        cudaFree(dVisibleUnitsActivationProbabilities);
-        cudaFree(dPositiveHiddenUnitsActivationProbabilities);
-        cudaFree(dNegativeHiddenUnitsActivationProbabilities);
-        cudaFree(dPositiveAssociations);
-        cudaFree(dNegativeAssociations);
+        checkCudaError(__LINE__, cudaFree(dVisibleUnitsActivationProbabilities));
+        checkCudaError(__LINE__, cudaFree(dPositiveHiddenUnitsActivationProbabilities));
+        checkCudaError(__LINE__, cudaFree(dNegativeHiddenUnitsActivationProbabilities));
+        checkCudaError(__LINE__, cudaFree(dPositiveAssociations));
+        checkCudaError(__LINE__, cudaFree(dNegativeAssociations));
     }
 
-    cudaFree(dRandom);
-    cudaFree(dVisibleUnitsStates);
-    cudaFree(dHiddenUnitsStates);
+    checkCudaError(__LINE__, cudaFree(dRandom));
+    checkCudaError(__LINE__, cudaFree(dVisibleUnitsStates));
+    checkCudaError(__LINE__, cudaFree(dHiddenUnitsStates));
 
     if (INFO) std::cout << "Learned weights:" << std::endl;
     if (INFO) printDeviceColumnMajorMatrix(dWeights, numVisible + 1, numHidden + 1);
@@ -284,25 +277,26 @@ float *RBM::hiddenStates(float *hVisible) {
     float *hHidden;
     float *dRandom;
 
-    cudaMalloc(&dVisible, (numVisible + 1) * sizeof(float));
-    cudaMalloc(&dHidden, (numHidden + 1) * sizeof(float));
+    checkCudaError(__LINE__, cudaMalloc(&dVisible, (numVisible + 1) * sizeof(float)));
+    checkCudaError(__LINE__, cudaMalloc(&dHidden, (numHidden + 1) * sizeof(float)));
 
     float bias = 1.0;
-    cudaMemcpy(dVisible, &bias, sizeof(float), cudaMemcpyHostToDevice);
-    cudaMemcpy(&dVisible[1], hVisible, numVisible * sizeof(float), cudaMemcpyHostToDevice); // set bias
+    checkCudaError(__LINE__, cudaMemcpy(dVisible, &bias, sizeof(float), cudaMemcpyHostToDevice));
+    checkCudaError(__LINE__, cudaMemcpy(&dVisible[1], hVisible, numVisible * sizeof(float), cudaMemcpyHostToDevice)); // set bias
 
     dHidden = hiddenActivationProbabilities(dVisible, 1);
 
     // sampling
-    cudaMalloc(&dRandom, (numHidden + 1) * sizeof(float));
+    checkCudaError(__LINE__, cudaMalloc(&dRandom, (numHidden + 1) * sizeof(float)));
     checkCuRandError(__LINE__, curandGenerateUniform(generator, dRandom, numHidden + 1));
-    int blockNumber = (numHidden + 1) / blockSize + 1;
-    greaterThan<<<blockNumber, blockSize>>>(dHidden, dRandom, dHidden, numHidden + 1);
+    int blockNumber = (numHidden + 1) / BLOCK_SIZE + 1;
+    greaterThan<<<blockNumber, BLOCK_SIZE>>>(dHidden, dRandom, dHidden, numHidden + 1);
+    checkCudaError(__LINE__);
 
     hHidden = (float *) malloc(numHidden * sizeof(float));
     cudaMemcpy(hHidden, &dHidden[1], numHidden * sizeof(float), cudaMemcpyDeviceToHost);
-    cudaFree(dHidden);
-    cudaFree(dVisible);
-    cudaFree(dRandom);
+    checkCudaError(__LINE__, cudaFree(dHidden));
+    checkCudaError(__LINE__, cudaFree(dVisible));
+    checkCudaError(__LINE__, cudaFree(dRandom));
     return hHidden;
 }

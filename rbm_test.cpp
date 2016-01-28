@@ -3,6 +3,7 @@
 #include <fstream>
 #include <iomanip>
 #include "rbm.h"
+#include "utils.h"
 
 using namespace std;
 
@@ -37,11 +38,9 @@ float *loadMNISTDataSet(string fileName) {
         n_rows = reverseInt(n_rows);
         file.read((char *) &n_cols, sizeof(n_cols));
         n_cols = reverseInt(n_cols);
-        cout << "Loading " << number_of_images << " images of dimensions "
-             << n_rows << "x" << n_cols << " from " << filePath << endl;
+        cout << "Loading " << number_of_images << " images of dimensions " << n_rows << "x" << n_cols << " from " << filePath << endl;
 
-        mnistDataSet = (float *) malloc(
-            n_rows * n_cols * number_of_images * sizeof(float));
+        mnistDataSet = (float *) malloc(n_rows * n_cols * number_of_images * sizeof(float));
 
         unsigned char temp = 0;
         float flag = 0;
@@ -91,19 +90,11 @@ void printMnistImages(int numberOfImagesToPring) {
 }
 
 void testMNIST() {
-    RBM rbm(28 * 28, 500, 0.01);
+    RBM rbm(28 * 28, 500, 0.1);
 
     float *trainingData = loadMNISTDataSet("train-images-idx3-ubyte");
 
     rbm.train(trainingData, 60000, 100);
-
-    float *testData = loadMNISTDataSet("t10k-images-idx3-ubyte");
-
-    // float *oneTestExample = malloc(28 * 28 * sizeof(float));
-
-    // cudaMemcpy2D(oneTestExample, , testData, , , , cudaMemcpyHostToHost);
-
-    // float *hidden = rbm.hiddenStates(testData);
 }
 
 void testSmallDataset() {
@@ -125,7 +116,7 @@ void testSmallDataset() {
 
     cout << "Training data:" << endl;
     printColumnMajorMatrix(trainingData, 6, 6);
-    rbm.train(trainingData, 6, 5000);
+    rbm.train(trainingData, 6, 100);
 
     float visible1 [] = {0, 0, 0, 1, 1, 0};
     cout << "Visible=" << endl;
@@ -150,8 +141,20 @@ void testSmallDataset() {
 }
 
 int main(int argc, char **argv) {
-    testSmallDataset();
-    // printMnistImages(5);
-    // testMNIST();
-    return 0;
+    if (argc != 2)
+        return 1;
+
+    string arg(argv[1]);
+
+    if (arg.compare(string("mnist")) == 0) {
+        testMNIST();
+        return 0;
+    } else if (arg.compare(string("small")) == 0) {
+        testSmallDataset();
+        return 0;
+    } else if (arg.compare(string("print")) == 0) {
+        printMnistImages(5);
+        return 0;
+    }
+    return 1;
 }

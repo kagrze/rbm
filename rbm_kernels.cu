@@ -34,17 +34,3 @@ __global__ void subAndSquare(float *a, float *b, int size) {
         a[idx] = sub * sub;
     }
 }
-
-// TODO optimize by using shared memory
-__global__ void sumReduce(float *array, int size) {
-    int idx = blockIdx.x * blockDim.x + threadIdx.x;
-
-    if (idx >= size / 2)
-        return;
-    for (int i = 1; i < size; i *= 2) {
-        if (idx * 2 * i + i < size) {
-            array[idx * 2 * i] += array[idx * 2 * i + i];
-            __syncthreads();
-        }
-    }
-}
