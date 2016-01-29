@@ -7,4 +7,4 @@ In order to test the implementation just type `make` in your command line. The f
 
 The implementation demonstrates [cuBLAS](https://developer.nvidia.com/cublas), [cuRAND](https://developer.nvidia.com/curand) and [Thrust](https://developer.nvidia.com/thrust) libraries. It was tested with CUDA version 7.5 on Nvidia Tesla M2090 GPU.
 
-Please bear in mind that this is a simplified implementation. To make it more applicable some optimizations should be undertaken. For example stochastic gradient descent (or its mini-batch version) should be used instead of batch gradient descent. Other optimization would be to reuse memory buffers among epochs instead of reallocate them within each step.
+Please bear in mind that this is a simplified implementation. To make it more applicable some optimizations should be undertaken. For example stochastic gradient descent (or its mini-batch version) should be used instead of batch gradient descent. Other optimization would be to reuse memory buffers among epochs instead of reallocating them within each step.
